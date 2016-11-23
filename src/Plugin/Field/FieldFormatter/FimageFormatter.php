@@ -11,6 +11,7 @@ use Drupal\image\Plugin\Field\FieldFormatter\ImageFormatter;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Url;
 use Drupal\Core\Cache\Cache;
+use Drupal\Core\Form\FormStateInterface;
 
 /**
  * Plugin implementation of the 'image_single' formatter.
@@ -28,70 +29,77 @@ class FimageFormatter extends ImageFormatter {
   /**
    * {@inheritdoc}
    */
+  public static function defaultSettings() {
+    return array(
+        'image_num' => '',
+      ) + parent::defaultSettings();
+  }
+
+
+  /**
+   * {@inheritdoc}
+   */
+  public function settingsForm(array $form, FormStateInterface $form_state) {
+    $element['image_num'] = array(
+      '#title' => t('Image number'),
+      '#type' => 'textfield',
+      '#default_value' => $this->getSetting('image_num'),
+      '#prefix' => ' <i>Be aware that image number start from 0</i>'
+    );
+    return $element;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function viewElements(FieldItemListInterface $items, $langcode) {
     $elements = array();
-    $items = $this->reduceImageList($items);
+    $image_num_setting = intval($this->getSetting('image_num'));
+    $items = $this->reduceImageList($items, $image_num_setting);
     $files = $this->getEntitiesToView($items, $langcode);
-
     // Early opt-out if the field is empty.
     if (empty($files)) {
-      return $elements;
-    }
-
-    $url = NULL;
-    $image_link_setting = $this->getSetting('image_link');
-    // Check if the formatter involves a link.
-    if ($image_link_setting == 'content') {
-      $entity = $items->getEntity();
-      if (!$entity->isNew()) {
-        $url_new = $entity->toUrl();
-        $url = $entity->urlInfo();
+      drupal_set_message(t('Image sequensial number for single image formatter set wrong. So it might not be rendered.'));
+      //incorrect image number so we use first image instead.
+      $items = $this->reduceImageList($items, 0, TRUE);
+      $files = $this->getEntitiesToView($items, $langcode);
+      if (empty($files)){
+        return $elements;
       }
     }
-    elseif ($image_link_setting == 'file') {
-      $link_file = TRUE;
+    $idx = null;
+    if (!empty($files)) {
+      $key = array_keys($files);
+      $idx = $key[0];
     }
-
-    $image_style_setting = $this->getSetting('image_style');
-
-    // Collect cache tags to be added for each item in the field.
-    $base_cache_tags = [];
-    if (!empty($image_style_setting)) {
-      $image_style = $this->imageStyleStorage->load($image_style_setting);
-      $base_cache_tags = $image_style->getCacheTags();
+    $cache_contexts = [];
+    if (isset($link_file)) {
+      $image_uri = $files[$idx]->getFileUri();
+      // @todo Wrap in file_url_transform_relative(). This is currently
+      // impossible. As a work-around, we currently add the 'url.site' cache
+      // context to ensure different file URLs are generated for different
+      // sites in a multisite setup, including HTTP and HTTPS versions of the
+      // same site. Fix in https://www.drupal.org/node/2646744.
+      $url = Url::fromUri(file_create_url($image_uri));
+      $cache_contexts[] = 'url.site';
     }
+    $cache_tags = $files[$idx]->getCacheTags();
 
-      $cache_contexts = [];
-      if (isset($link_file)) {
-        $image_uri = $files[0]->getFileUri();
-        // @todo Wrap in file_url_transform_relative(). This is currently
-        // impossible. As a work-around, we currently add the 'url.site' cache
-        // context to ensure different file URLs are generated for different
-        // sites in a multisite setup, including HTTP and HTTPS versions of the
-        // same site. Fix in https://www.drupal.org/node/2646744.
-        $url = Url::fromUri(file_create_url($image_uri));
-        $cache_contexts[] = 'url.site';
-      }
-      $cache_tags = Cache::mergeTags($base_cache_tags, $files[0]->getCacheTags());
+    // Extract field item attributes for the theme function, and unset them
+    // from the $item so that the field template does not re-render them.
+    $item = $files[$idx]->_referringItem;
+    $item_attributes = $item->_attributes;
+    unset($item->_attributes);
 
-      // Extract field item attributes for the theme function, and unset them
-      // from the $item so that the field template does not re-render them.
-      $item = $files[0]->_referringItem;
-      $item_attributes = $item->_attributes;
-      unset($item->_attributes);
-
-      $elements[0] = array(
-        '#theme' => 'image_formatter',
-        '#item' => $item,
-        '#item_attributes' => $item_attributes,
-        '#image_style' => $image_style_setting,
-        '#url' => $url,
-        '#cache' => array(
-          'tags' => $cache_tags,
-          'contexts' => $cache_contexts,
-        ),
-      );
-
+    $elements[] = array(
+      '#theme' => 'image_formatter',
+      '#item' => $item,
+      '#item_attributes' => $item_attributes,
+      '#cache' => array(
+        'tags' => $cache_tags,
+        'contexts' => $cache_contexts,
+      ),
+    );
     return $elements;
   }
 
@@ -100,10 +108,14 @@ class FimageFormatter extends ImageFormatter {
    * @param $items
    * @return mixed
    */
-  protected function reduceImageList($items) {
+  protected function reduceImageList($items, $num, $second = FALSE) {
+    //
     foreach ($items as $delta => &$item){
-      if ($delta) {
+      if ($delta !== $num && !$second) {
         unset($item->_loaded);
+      }
+      elseif ($delta == $num && $second){
+        $item->_loaded = true;
       }
     }
     return $items;
