@@ -16,8 +16,8 @@ use Drupal\Core\Cache\Cache;
  * Plugin implementation of the 'image_single' formatter.
  *
  * @FieldFormatter(
- *   id = "single_image_formatter",
- *   label = @Translation("Single Image Formatter"),
+ *   id = "fingle_image_formatter",
+ *   label = @Translation("First Image Formatter"),
  *   field_types = {
  *     "image"
  *   }
@@ -30,7 +30,7 @@ class FimageFormatter extends ImageFormatter {
    */
   public function viewElements(FieldItemListInterface $items, $langcode) {
     $elements = array();
-
+    $items = $this->reduceImageList($items);
     $files = $this->getEntitiesToView($items, $langcode);
 
     // Early opt-out if the field is empty.
@@ -95,4 +95,17 @@ class FimageFormatter extends ImageFormatter {
     return $elements;
   }
 
+  /**
+   * Reduce image list to only first image
+   * @param $items
+   * @return mixed
+   */
+  protected function reduceImageList($items) {
+    foreach ($items as $delta => &$item){
+      if ($delta) {
+        unset($item->_loaded);
+      }
+    }
+    return $items;
+  }
 }

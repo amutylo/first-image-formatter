@@ -1,0 +1,7 @@
+name: First Image Formatter
+type: module
+description: Add a first image formatter for image field
+package: First Image
+core: 8.x
+dependencies:
+  - image
